@@ -1,102 +1,215 @@
-<!doctype html>
-<meta charset="utf-8">
-<title>Auth テスト（IDトークン付き）</title>
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>瞬訳スキャナー - 画像翻訳アプリ（ログイン必須）</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      font-family: 'Noto Sans JP', sans-serif;
+      background-color: #e0e7ff;
+      background-image:
+        radial-gradient(circle at 15% 50%, #a5b4fc 0%, rgba(165,180,252,0) 35%),
+        radial-gradient(circle at 85% 30%, #c4b5fd 0%, rgba(196,181,253,0) 35%),
+        radial-gradient(circle at 50% 80%, #d8b4fe 0%, rgba(216,180,254,0) 40%);
+      background-attachment: fixed;
+    }
+    .drop-zone { border: 2px dashed #cbd5e1; transition: background-color .2s, border-color .2s; }
+    .drop-zone.drag-over { background:#e2e8f0; border-color:#6366f1; }
+    .loader { border-top-color:#6366f1; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body class="text-gray-800 flex items-center justify-center min-h-screen p-4">
+  <div class="w-full max-w-4xl bg-white/80 backdrop-blur rounded-xl shadow-lg p-6">
+    <header class="text-center mb-6">
+      <h1 class="text-3xl font-bold text-indigo-600">瞬訳スキャナー</h1>
+      <p class="text-gray-600 mt-2">画像をアップロードすると、AIが日本語に翻訳します。</p>
+    </header>
 
-<p id="status">ログインしてください</p>
+    <!-- ログインビュー -->
+    <section id="loginView" class="text-center space-y-3">
+      <p id="status" class="text-gray-700">ログインしてください</p>
+      <button id="btnLogin" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded">
+        Google でログイン
+      </button>
+    </section>
 
-<!-- ログイン中だけ見えるセクション -->
-<div id="authed" hidden>
-  <p>UID: <span id="uid"></span></p>
-  <button id="btnShowToken">IDトークンを表示</button>
-  <button id="btnCopyToken">トークンをコピー</button>
-  <pre id="token" style="white-space: pre-wrap; word-break: break-all;" hidden></pre>
-</div>
+    <!-- アプリ本体（ログイン後だけ表示） -->
+    <main id="appView" class="hidden">
+      <div class="flex justify-end mb-4">
+        <button id="btnLogout" class="bg-gray-500 hover:bg-gray-600 text-white px-3 py-1 rounded">ログアウト</button>
+      </div>
 
-<!-- ログイン/ログアウト -->
-<button id="btnLogin">Googleでログイン</button>
-<button id="btnLogout" hidden>ログアウト</button>
+      <!-- Upload area -->
+      <div id="upload-container">
+        <div id="drop-zone" class="drop-zone w-full rounded-lg p-6 text-center cursor-pointer bg-white hover:bg-gray-50">
+          <input type="file" id="file-input" class="hidden" accept="image/*" />
+          <p class="text-gray-700">画像をドラッグ＆ドロップ または クリックで選択</p>
+        </div>
+      </div>
 
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-app.js";
-import {
-  getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, getIdToken
-} from "https://www.gstatic.com/firebasejs/10.9.0/firebase-auth.js";
+      <!-- Results -->
+      <div id="result-container" class="hidden mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <h2 class="font-semibold mb-2">元の画像</h2>
+          <img id="image-preview" class="w-full max-h-80 object-contain border rounded" />
+        </div>
+        <div>
+          <h2 class="font-semibold mb-2">翻訳結果</h2>
+          <div id="loader-container" class="flex items-center justify-center h-40 bg-gray-100 rounded">
+            <div class="loader w-8 h-8 border-4 border-gray-300 rounded-full"></div>
+            <span class="ml-3 text-gray-600" id="status-text">解析中...</span>
+          </div>
+          <div id="translation-output" class="hidden p-3 bg-indigo-50 rounded">
+            <p class="whitespace-pre-wrap text-gray-800"></p>
+          </div>
+          <div id="error-output" class="hidden p-3 bg-red-100 rounded">
+            <p class="text-red-700 font-semibold">エラーが発生しました</p>
+            <p id="error-message" class="text-red-600 mt-1"></p>
+          </div>
+        </div>
+      </div>
+      <div class="text-center mt-6">
+        <button id="reset-button" class="hidden bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded">別の画像を試す</button>
+      </div>
+    </main>
+  </div>
 
-const firebaseConfig = {
-  apiKey: "AIzaSyDEeJTeI3fBPMbPnUwQIBwQL7mmqPw57bc",
-  authDomain: "gazouhonnyaku-auth.firebaseapp.com",
-  projectId: "gazouhonnyaku-auth",
-  storageBucket: "gazouhonnyaku-auth.firebasestorage.app",
-  messagingSenderId: "608329907159",
-  appId: "1:608329907159:web:b58521a43b5026b5376992"
-};
+  <!-- Firebase Auth（ログイン制御＋IDトークン取得） -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-app.js";
+    import {
+      getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged
+    } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-auth.js";
 
-initializeApp(firebaseConfig);
-const auth = getAuth();
-const provider = new GoogleAuthProvider();
+    const firebaseConfig = {
+      apiKey: "AIzaSyDEeJTeI3fBPMbPnUwQIBwQL7mmqPw57bc",
+      authDomain: "gazouhonnyaku-auth.firebaseapp.com",
+      projectId: "gazouhonnyaku-auth",
+      storageBucket: "gazouhonnyaku-auth.firebasestorage.app",
+      messagingSenderId: "608329907159",
+      appId: "1:608329907159:web:b58521a43b5026b5376992"
+    };
 
-// 要素
-const statusEl   = document.getElementById("status");
-const btnLogin   = document.getElementById("btnLogin");
-const btnLogout  = document.getElementById("btnLogout");
-const authedBox  = document.getElementById("authed");
-const uidEl      = document.getElementById("uid");
-const btnShowTok = document.getElementById("btnShowToken");
-const btnCopyTok = document.getElementById("btnCopyToken");
-const tokenEl    = document.getElementById("token");
+    initializeApp(firebaseConfig);
+    const auth = getAuth();
+    const provider = new GoogleAuthProvider();
 
-// ログイン/ログアウト
-btnLogin.onclick  = () => signInWithPopup(auth, provider);
-btnLogout.onclick = () => signOut(auth);
+    const loginView = document.getElementById("loginView");
+    const appView   = document.getElementById("appView");
+    const statusEl  = document.getElementById("status");
+    const btnLogin  = document.getElementById("btnLogin");
+    const btnLogout = document.getElementById("btnLogout");
 
-// 状態変化
-onAuthStateChanged(auth, async (u) => {
-  const signedIn = !!u;
-  statusEl.textContent = signedIn
-    ? `ようこそ ${u.displayName || u.email}`
-    : "ログインしてください";
-  btnLogin.hidden  = signedIn;
-  btnLogout.hidden = !signedIn;
-  authedBox.hidden = !signedIn;
+    btnLogin?.addEventListener("click", () => signInWithPopup(auth, provider));
+    btnLogout?.addEventListener("click", () => signOut(auth));
 
-  if (signedIn) {
-    uidEl.textContent = u.uid;
-    tokenEl.hidden = true;         // 再ログイン時は非表示に戻す
-    window.idToken = null;
-  }
-});
+    onAuthStateChanged(auth, (u) => {
+      const signedIn = !!u;
+      loginView.classList.toggle("hidden", signedIn);
+      appView.classList.toggle("hidden", !signedIn);
+      statusEl.textContent = signedIn ? `ようこそ ${u.displayName || u.email}` : "ログインしてください";
+      window.uid = signedIn ? u.uid : null;
+    });
 
-// IDトークン取得＆表示
-btnShowTok.onclick = async () => {
-  if (!auth.currentUser) return alert("先にログインしてください");
-  const t = await getIdToken(auth.currentUser, /*forceRefresh*/ true);
-  window.idToken = t;
-  tokenEl.textContent = t;
-  tokenEl.hidden = false;
-};
+    // ====== 以下：アプリ本体処理 ======
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    const uploadContainer = document.getElementById('upload-container');
+    const resultContainer = document.getElementById('result-container');
+    const imagePreview = document.getElementById('image-preview');
+    const loaderContainer = document.getElementById('loader-container');
+    const statusText = document.getElementById('status-text');
+    const translationOutput = document.getElementById('translation-output');
+    const errorOutput = document.getElementById('error-output');
+    const errorMessage = document.getElementById('error-message');
+    const resetButton = document.getElementById('reset-button');
 
-// クリップボードにコピー
-btnCopyTok.onclick = async () => {
-  try {
-    if (!window.idToken) await btnShowTok.onclick();
-    await navigator.clipboard.writeText(window.idToken);
-    alert("コピーしました");
-  } catch (e) {
-    alert("コピーに失敗しました: " + e);
-  }
-};
+    function requireLogin() {
+      if (!window.uid) { alert('先にログインしてください'); return false; }
+      return true;
+    }
 
-/*
-  ▼ 実際のAPI呼び出しはこんな感じで「Authorization: Bearer <IDトークン>」を付けます
+    dropZone.addEventListener('click', () => { if (!requireLogin()) return; fileInput.click(); });
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); if (!window.uid) return; dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault(); dropZone.classList.remove('drag-over');
+      if (!requireLogin()) return;
+      const files = e.dataTransfer.files;
+      if (files.length > 0) handleFile(files[0]);
+    });
+    fileInput.addEventListener('change', (e) => { if (!requireLogin()) return; if (e.target.files.length > 0) handleFile(e.target.files[0]); });
 
-  const res = await fetch('https://ocr-translate-api.vercel.app/api/translate', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${window.idToken}`
-    },
-    body: JSON.stringify({ base64ImageData: '...' })
-  });
+    resetButton.addEventListener('click', () => {
+      uploadContainer.classList.remove('hidden');
+      resultContainer.classList.add('hidden');
+      resetButton.classList.add('hidden');
+      imagePreview.src = '';
+      fileInput.value = '';
+      loaderContainer.classList.remove('hidden');
+      translationOutput.classList.add('hidden');
+      errorOutput.classList.add('hidden');
+      translationOutput.querySelector('p').textContent = '';
+      errorMessage.textContent = '';
+    });
 
-*/
-</script>
+    function handleFile(file) {
+      if (!file.type.startsWith('image/')) return;
+      uploadContainer.classList.add('hidden');
+      resultContainer.classList.remove('hidden');
+      resetButton.classList.remove('hidden');
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        imagePreview.src = e.target.result;
+        const base64 = e.target.result.split(',')[1];
+        translateImage(base64);
+      };
+      reader.readAsDataURL(file);
+    }
+
+    async function translateImage(base64) {
+      loaderContainer.classList.remove('hidden');
+      translationOutput.classList.add('hidden');
+      errorOutput.classList.add('hidden');
+      statusText.textContent = 'AIが画像を解析・翻訳中です...';
+
+      try {
+        // ★ IDトークンを付与して呼び出す（サーバー側で許可チェック可能）
+        const token = await auth.currentUser.getIdToken(true);
+        const res = await fetch('https://ocr-translate-api.vercel.app/api/translate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ base64ImageData: base64 }),
+        });
+
+        const text = await res.text();
+        if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText} / ${text.slice(0, 200)}`);
+
+        const data = JSON.parse(text);
+        loaderContainer.classList.add('hidden');
+        translationOutput.classList.remove('hidden');
+        translationOutput.querySelector('p').textContent = data.translated || '(空の応答)';
+      } catch (err) {
+        loaderContainer.classList.add('hidden');
+        errorOutput.classList.remove('hidden');
+        if (String(err).includes('413')) {
+          errorMessage.textContent = '画像が大きすぎます。もう少し小さい画像でお試しください。';
+        } else if (String(err).includes('429') || String(err).includes('quota')) {
+          errorMessage.textContent = 'APIの回数制限/クォータに達しました。時間を置いて再試行してください。';
+        } else if (String(err).includes('Failed to fetch')) {
+          errorMessage.textContent = 'ネットワーク/CORSエラーの可能性があります。しばらく待って再試行してください。';
+        } else {
+          errorMessage.textContent = String(err);
+        }
+      }
+    }
+  </script>
+</body>
+</html>
