@@ -17,18 +17,25 @@ export default async function handler(req, res) {
   res.setHeader('X-Api-Version', 'auth-v3');
 
   // ===== CORS =====
-  const allowedOrigins = [
-    'https://gazouhonnyaku-auth.web.app',
-    'http://localhost:5000',
-  ];
-  const origin = req.headers.origin || '';
-  const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
-  res.setHeader('Access-Control-Allow-Origin', corsOrigin);
-  res.setHeader('Vary', 'Origin');
-  res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
-  res.setHeader('Access-Control-Max-Age', '86400');
-  if (req.method === 'OPTIONS') return res.status(204).end();
+const allowedOrigins = [
+  'https://gazouhonnyaku-auth.web.app',
+  'http://localhost:5000',
+];
+const origin = req.headers.origin || '';
+const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
+
+res.setHeader('Access-Control-Allow-Origin', corsOrigin);
+res.setHeader('Vary', 'Origin');
+// preflight で要求されたヘッダーをそのまま許可（無ければデフォルト）
+const acReqHeaders =
+  req.headers['access-control-request-headers'] || 'authorization, content-type';
+res.setHeader('Access-Control-Allow-Headers', acReqHeaders);
+res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
+res.setHeader('Access-Control-Max-Age', '86400');
+
+if (req.method === 'OPTIONS') return res.status(204).end();
+
+
   // =================
 
   if (req.method !== 'POST') {
