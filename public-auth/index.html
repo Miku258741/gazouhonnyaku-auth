@@ -80,8 +80,14 @@
   <!-- Firebase Auth -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-app.js";
-    import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged }
-      from "https://www.gstatic.com/firebasejs/10.9.0/firebase-auth.js";
+    import {
+      getAuth,
+      GoogleAuthProvider,
+      signInWithPopup,
+      signOut,
+      onAuthStateChanged,
+      getIdToken
+    } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-auth.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyDEeJTeI3fBPMbPnUwQIBwQL7mmqPw57bc",
@@ -105,13 +111,25 @@
     btnLogin?.addEventListener("click", () => signInWithPopup(auth, provider));
     btnLogout?.addEventListener("click", () => signOut(auth));
 
-    onAuthStateChanged(auth, (u) => {
+    onAuthStateChanged(auth, async (u) => {
       const signedIn = !!u;
       loginView.classList.toggle("hidden", signedIn);
       appView.classList.toggle("hidden", !signedIn);
       if (statusEl) statusEl.textContent = signedIn ? `ようこそ ${u.displayName || u.email}` : "ログインしてください";
+      // 使い回し用
       window.uid = signedIn ? u.uid : null;
     });
+
+    // グローバルから token を取れるようにするヘルパ
+    window.getFreshIdToken = async () => {
+      if (!auth.currentUser) return null;
+      try {
+        // 最新トークン取得（強制リフレッシュ）
+        return await getIdToken(auth.currentUser, true);
+      } catch {
+        return null;
+      }
+    };
   </script>
 
   <!-- アプリ処理 -->
@@ -128,7 +146,13 @@
     const errorMessage = document.getElementById('error-message');
     const resetButton = document.getElementById('reset-button');
 
-    function requireLogin() { if (!window.uid) { alert('先にログインしてください'); return false; } return true; }
+    function requireLogin() {
+      if (!window.uid) {
+        alert('先にログインしてください');
+        return false;
+      }
+      return true;
+    }
 
     dropZone.addEventListener('click', () => { if (!requireLogin()) return; fileInput.click(); });
     dropZone.addEventListener('dragover', (e) => { e.preventDefault(); if (!window.uid) return; dropZone.classList.add('drag-over'); });
@@ -175,20 +199,46 @@
       statusText.textContent = 'AIが画像を解析・翻訳中です...';
 
       try {
+        // ここで最新の ID トークンを取得して Authorization に付与
+        const token = await window.getFreshIdToken();
+        if (!token) {
+          throw new Error('AUTH_REQUIRED');
+        }
+
         const res = await fetch('https://ocr-translate-api.vercel.app/api/translate', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
           body: JSON.stringify({ base64ImageData: base64 }),
         });
-        if (!res.ok) throw new Error('APIエラー');
+
+        if (!res.ok) {
+          // 401/403 は「未認可/未許可」として UI に分かりやすく表示
+          if (res.status === 401 || res.status === 403) {
+            const msg = res.status === 401
+              ? '認証エラー：再ログインしてください。'
+              : 'このアカウントではご利用いただけません（未許可/期限切れの可能性）。';
+            throw new Error(msg);
+          }
+          throw new Error('APIエラー');
+        }
+
         const data = await res.json();
         loaderContainer.classList.add('hidden');
         translationOutput.classList.remove('hidden');
-        translationOutput.querySelector('p').textContent = data.translated;
+        translationOutput.querySelector('p').textContent = data.translated || '(翻訳テキストがありません)';
       } catch (err) {
         loaderContainer.classList.add('hidden');
         errorOutput.classList.remove('hidden');
-        errorMessage.textContent = '翻訳に失敗しました';
+        if (err && err.message === 'AUTH_REQUIRED') {
+          errorMessage.textContent = 'ログイン状態を確認できません。いったんログアウトしてログインし直してください。';
+        } else if (typeof err?.message === 'string') {
+          errorMessage.textContent = err.message;
+        } else {
+          errorMessage.textContent = '翻訳に失敗しました';
+        }
       }
     }
   </script>
