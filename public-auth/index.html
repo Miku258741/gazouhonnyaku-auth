@@ -1,11 +1,26 @@
-<!doctype html><meta charset="utf-8"><title>Auth テスト</title>
+<!doctype html>
+<meta charset="utf-8">
+<title>Auth テスト（IDトークン付き）</title>
+
 <p id="status">ログインしてください</p>
+
+<!-- ログイン中だけ見えるセクション -->
+<div id="authed" hidden>
+  <p>UID: <span id="uid"></span></p>
+  <button id="btnShowToken">IDトークンを表示</button>
+  <button id="btnCopyToken">トークンをコピー</button>
+  <pre id="token" style="white-space: pre-wrap; word-break: break-all;" hidden></pre>
+</div>
+
+<!-- ログイン/ログアウト -->
 <button id="btnLogin">Googleでログイン</button>
 <button id="btnLogout" hidden>ログアウト</button>
+
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-app.js";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged }
-  from "https://www.gstatic.com/firebasejs/10.9.0/firebase-auth.js";
+import {
+  getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, getIdToken
+} from "https://www.gstatic.com/firebasejs/10.9.0/firebase-auth.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDEeJTeI3fBPMbPnUwQIBwQL7mmqPw57bc",
@@ -20,17 +35,68 @@ initializeApp(firebaseConfig);
 const auth = getAuth();
 const provider = new GoogleAuthProvider();
 
-/* ← ここが追加ポイント */
-const statusEl  = document.getElementById("status");
-const btnLogin  = document.getElementById("btnLogin");
-const btnLogout = document.getElementById("btnLogout");
+// 要素
+const statusEl   = document.getElementById("status");
+const btnLogin   = document.getElementById("btnLogin");
+const btnLogout  = document.getElementById("btnLogout");
+const authedBox  = document.getElementById("authed");
+const uidEl      = document.getElementById("uid");
+const btnShowTok = document.getElementById("btnShowToken");
+const btnCopyTok = document.getElementById("btnCopyToken");
+const tokenEl    = document.getElementById("token");
 
+// ログイン/ログアウト
 btnLogin.onclick  = () => signInWithPopup(auth, provider);
 btnLogout.onclick = () => signOut(auth);
 
-onAuthStateChanged(auth, (u) => {
-  statusEl.textContent = u ? `ようこそ ${u.displayName || u.email}` : "ログインしてください";
-  btnLogin.hidden  = !!u;
-  btnLogout.hidden = !u;
+// 状態変化
+onAuthStateChanged(auth, async (u) => {
+  const signedIn = !!u;
+  statusEl.textContent = signedIn
+    ? `ようこそ ${u.displayName || u.email}`
+    : "ログインしてください";
+  btnLogin.hidden  = signedIn;
+  btnLogout.hidden = !signedIn;
+  authedBox.hidden = !signedIn;
+
+  if (signedIn) {
+    uidEl.textContent = u.uid;
+    tokenEl.hidden = true;         // 再ログイン時は非表示に戻す
+    window.idToken = null;
+  }
 });
+
+// IDトークン取得＆表示
+btnShowTok.onclick = async () => {
+  if (!auth.currentUser) return alert("先にログインしてください");
+  const t = await getIdToken(auth.currentUser, /*forceRefresh*/ true);
+  window.idToken = t;
+  tokenEl.textContent = t;
+  tokenEl.hidden = false;
+};
+
+// クリップボードにコピー
+btnCopyTok.onclick = async () => {
+  try {
+    if (!window.idToken) await btnShowTok.onclick();
+    await navigator.clipboard.writeText(window.idToken);
+    alert("コピーしました");
+  } catch (e) {
+    alert("コピーに失敗しました: " + e);
+  }
+};
+
+/*
+  ▼ 実際のAPI呼び出しはこんな感じで「Authorization: Bearer <IDトークン>」を付けます
+
+  const res = await fetch('https://ocr-translate-api.vercel.app/api/translate', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${window.idToken}`
+    },
+    body: JSON.stringify({ base64ImageData: '...' })
+  });
+
+*/
 </script>
