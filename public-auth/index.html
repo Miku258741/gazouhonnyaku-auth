@@ -77,12 +77,11 @@
     </main>
   </div>
 
-  <!-- Firebase Auth（ログイン制御＋IDトークン取得） -->
+  <!-- Firebase Auth -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-app.js";
-    import {
-      getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged
-    } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-auth.js";
+    import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged }
+      from "https://www.gstatic.com/firebasejs/10.9.0/firebase-auth.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyDEeJTeI3fBPMbPnUwQIBwQL7mmqPw57bc",
@@ -110,11 +109,13 @@
       const signedIn = !!u;
       loginView.classList.toggle("hidden", signedIn);
       appView.classList.toggle("hidden", !signedIn);
-      statusEl.textContent = signedIn ? `ようこそ ${u.displayName || u.email}` : "ログインしてください";
+      if (statusEl) statusEl.textContent = signedIn ? `ようこそ ${u.displayName || u.email}` : "ログインしてください";
       window.uid = signedIn ? u.uid : null;
     });
+  </script>
 
-    // ====== 以下：アプリ本体処理 ======
+  <!-- アプリ処理 -->
+  <script>
     const dropZone = document.getElementById('drop-zone');
     const fileInput = document.getElementById('file-input');
     const uploadContainer = document.getElementById('upload-container');
@@ -127,10 +128,7 @@
     const errorMessage = document.getElementById('error-message');
     const resetButton = document.getElementById('reset-button');
 
-    function requireLogin() {
-      if (!window.uid) { alert('先にログインしてください'); return false; }
-      return true;
-    }
+    function requireLogin() { if (!window.uid) { alert('先にログインしてください'); return false; } return true; }
 
     dropZone.addEventListener('click', () => { if (!requireLogin()) return; fileInput.click(); });
     dropZone.addEventListener('dragover', (e) => { e.preventDefault(); if (!window.uid) return; dropZone.classList.add('drag-over'); });
@@ -147,8 +145,7 @@
       uploadContainer.classList.remove('hidden');
       resultContainer.classList.add('hidden');
       resetButton.classList.add('hidden');
-      imagePreview.src = '';
-      fileInput.value = '';
+      imagePreview.src = ''; fileInput.value = '';
       loaderContainer.classList.remove('hidden');
       translationOutput.classList.add('hidden');
       errorOutput.classList.add('hidden');
@@ -178,36 +175,20 @@
       statusText.textContent = 'AIが画像を解析・翻訳中です...';
 
       try {
-        // ★ IDトークンを付与して呼び出す（サーバー側で許可チェック可能）
-        const token = await auth.currentUser.getIdToken(true);
         const res = await fetch('https://ocr-translate-api.vercel.app/api/translate', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ base64ImageData: base64 }),
         });
-
-        const text = await res.text();
-        if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText} / ${text.slice(0, 200)}`);
-
-        const data = JSON.parse(text);
+        if (!res.ok) throw new Error('APIエラー');
+        const data = await res.json();
         loaderContainer.classList.add('hidden');
         translationOutput.classList.remove('hidden');
-        translationOutput.querySelector('p').textContent = data.translated || '(空の応答)';
+        translationOutput.querySelector('p').textContent = data.translated;
       } catch (err) {
         loaderContainer.classList.add('hidden');
         errorOutput.classList.remove('hidden');
-        if (String(err).includes('413')) {
-          errorMessage.textContent = '画像が大きすぎます。もう少し小さい画像でお試しください。';
-        } else if (String(err).includes('429') || String(err).includes('quota')) {
-          errorMessage.textContent = 'APIの回数制限/クォータに達しました。時間を置いて再試行してください。';
-        } else if (String(err).includes('Failed to fetch')) {
-          errorMessage.textContent = 'ネットワーク/CORSエラーの可能性があります。しばらく待って再試行してください。';
-        } else {
-          errorMessage.textContent = String(err);
-        }
+        errorMessage.textContent = '翻訳に失敗しました';
       }
     }
   </script>
