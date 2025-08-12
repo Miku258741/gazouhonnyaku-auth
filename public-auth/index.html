@@ -192,55 +192,60 @@
       reader.readAsDataURL(file);
     }
 
-    async function translateImage(base64) {
-      loaderContainer.classList.remove('hidden');
-      translationOutput.classList.add('hidden');
-      errorOutput.classList.add('hidden');
-      statusText.textContent = 'AIが画像を解析・翻訳中です...';
+    // ...省略...
 
-      try {
-        // ここで最新の ID トークンを取得して Authorization に付与
-        const token = await window.getFreshIdToken();
-        if (!token) {
-          throw new Error('AUTH_REQUIRED');
+  async function translateImage(base64) {
+    // 解析中のUI
+    loaderContainer.classList.remove('hidden');
+    translationOutput.classList.add('hidden');
+    errorOutput.classList.add('hidden');
+    statusText.textContent = 'AIが画像を解析・翻訳中です...';
+
+    try {
+      const token = await window.getFreshIdToken();
+      if (!token) throw new Error('AUTH_REQUIRED');
+
+      const res = await fetch('https://ocr-translate-api.vercel.app/api/translate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ base64ImageData: base64 }),
+      });
+
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          const msg = res.status === 401
+            ? '認証エラー：再ログインしてください。'
+            : 'このアカウントではご利用いただけません（未許可/期限切れの可能性）。';
+          throw new Error(msg);
         }
-
-        const res = await fetch('https://ocr-translate-api.vercel.app/api/translate', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({ base64ImageData: base64 }),
-        });
-
-        if (!res.ok) {
-          // 401/403 は「未認可/未許可」として UI に分かりやすく表示
-          if (res.status === 401 || res.status === 403) {
-            const msg = res.status === 401
-              ? '認証エラー：再ログインしてください。'
-              : 'このアカウントではご利用いただけません（未許可/期限切れの可能性）。';
-            throw new Error(msg);
-          }
-          throw new Error('APIエラー');
-        }
-
-        const data = await res.json();
-        loaderContainer.classList.add('hidden');
-        translationOutput.classList.remove('hidden');
-        translationOutput.querySelector('p').textContent = data.translated || '(翻訳テキストがありません)';
-      } catch (err) {
-        loaderContainer.classList.add('hidden');
-        errorOutput.classList.remove('hidden');
-        if (err && err.message === 'AUTH_REQUIRED') {
-          errorMessage.textContent = 'ログイン状態を確認できません。いったんログアウトしてログインし直してください。';
-        } else if (typeof err?.message === 'string') {
-          errorMessage.textContent = err.message;
-        } else {
-          errorMessage.textContent = '翻訳に失敗しました';
-        }
+        throw new Error('APIエラー');
       }
+
+      const data = await res.json();
+      loaderContainer.classList.add('hidden');
+      translationOutput.classList.remove('hidden');
+      translationOutput.querySelector('p').textContent =
+        data.translated || '(翻訳テキストがありません)';
+    } catch (err) {
+      loaderContainer.classList.add('hidden');
+      errorOutput.classList.remove('hidden');
+      if (err && err.message === 'AUTH_REQUIRED') {
+        errorMessage.textContent = 'ログイン状態を確認できません。いったんログアウトしてログインし直してください。';
+      } else if (typeof err?.message === 'string') {
+        errorMessage.textContent = err.message;
+      } else {
+        errorMessage.textContent = '翻訳に失敗しました';
+      }
+    } finally {
+      // ★ 成功でもエラーでも、必ずボタンを表示して見える位置にスクロール
+      resetButton.classList.remove('hidden');
+      // 下に隠れていて気づかないことがあるのでスクロールも
+      resetButton.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      // フォーカスも当てておくとアクセシビリティ的にも◎
+      resetButton.focus();
     }
-  </script>
-</body>
-</html>
+  }
+</script>
